@@ -1,66 +1,60 @@
-// Worker: Analiza imágenes con Workers AI (Llama 3.2 Vision)
-function cors(env) {
+// Worker: análisis de imágenes con Workers AI (sin OpenAI, gratis con cuota CF)
+function cors() {
+  const origin = "https://oseuis57.github.io"; // tu GitHub Pages
   return {
-    // pon tu dominio real de Pages:
-    "Access-Control-Allow-Origin": "https://oseuis57.github.io",
+    "Access-Control-Allow-Origin": origin,
+    "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
 }
 
-function json(data, env, status = 200) {
+function j(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...cors(env) },
+    headers: { "Content-Type": "application/json", ...cors() },
   });
 }
 
 export default {
-  async fetch(request, env) {
-    if (request.method === "OPTIONS")
-      return new Response("", { headers: cors(env) });
-
-    if (request.method !== "POST")
-      return new Response("Use POST /analyze", { status: 405, headers: cors(env) });
-
-    const url = new URL(request.url);
-    if (url.pathname !== "/analyze")
-      return new Response("Not found", { status: 404, headers: cors(env) });
+  async fetch(req, env) {
+    if (req.method === "OPTIONS") return new Response("", { headers: cors() });
+    const url = new URL(req.url);
+    if (req.method !== "POST" || url.pathname !== "/analyze") {
+      return new Response("Use POST /analyze", { status: 405, headers: cors() });
+    }
 
     try {
-      const form = await request.formData();
+      const form = await req.formData();
       const file = form.get("image");
-      if (!file || typeof file === "string")
-        return json({ error: "Falta el archivo 'image'" }, env, 400);
+      if (!file || typeof file === "string") return j({ error: "Falta 'image'" }, 400);
+      const prompt = (form.get("prompt") || "Analiza la imagen y resume hallazgos.").toString();
 
-      const prompt = (form.get("prompt") || "Analiza la imagen y describe hallazgos clave.").toString();
-
-      // a) Convertir a base64 data URL
+      // buffer binario para Workers AI (mejor que base64)
       const buf = await file.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-      const mime = file.type || "image/png";
-      const dataUrl = `data:${mime};base64,${b64}`;
 
-      // b) Llamada a Workers AI - modelo de visión
-      // doc: llama-3.2-11b-vision-instruct
-      const result = await env.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", {
-        messages: [
-          { role: "system", content: "Eres un analista ambiental conciso y claro." },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: dataUrl } },
-            ],
-          },
-        ],
-        max_tokens: 300
+      // Modelo vision de Workers AI (puedes cambiarlo por otro disponible)
+      const MODEL = env.ANALYZER_MODEL || "@cf/llama-3.2-11b-vision-instruct";
+
+      const aiRes = await env.AI.run(MODEL, {
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image", image: buf },  // <- pasamos el binario
+          ],
+        }],
       });
 
-      const text = result?.response ?? "Sin respuesta de texto.";
-      return json({ analysis: text }, env);
+      const text =
+        aiRes?.response ??
+        aiRes?.output_text ??
+        aiRes?.result ??
+        "Sin respuesta de texto.";
+
+      return j({ analysis: text });
     } catch (e) {
-      return json({ error: "Error procesando solicitud", detail: String(e) }, env, 500);
+      return j({ error: "Error procesando solicitud", detail: String(e) }, 500);
     }
   },
 };
