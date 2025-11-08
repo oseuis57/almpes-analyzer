@@ -1,0 +1,6 @@
+name = "almpes-analyzer"
+main = "src/worker.js"
+compatibility_date = "2024-11-08"
+
+[ai]
+binding = "AI"
